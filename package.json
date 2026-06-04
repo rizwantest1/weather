@@ -1,0 +1,27 @@
+{
+  "name": "bangladesh-weather-forecast",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Modern responsive website that automatically displays the latest Bangladesh Meteorological Department (BMD) weather forecast PDF.",
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0 -p 3000",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0 -p 3000",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "next": "15.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3"
+  }
+}
