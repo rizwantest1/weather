@@ -1,7 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ForecastResponse, ForecastApiResult } from "@/lib/types";
+import type {
+  ForecastResponse,
+  ForecastApiResult,
+  ForecastLang,
+} from "@/lib/types";
 import ForecastInfoCard from "./ForecastInfoCard";
 import PdfViewer from "./PdfViewer";
 import Notification from "./Notification";
@@ -13,11 +17,12 @@ const AUTO_REFRESH_MS = 15 * 60 * 1000;
 type Status = "loading" | "ready" | "error";
 
 /**
- * Top-level client orchestrator for the forecast feature:
- *  - Fetches forecast metadata from /api/forecast.
- *  - Renders the info card + PDF.js viewer.
- *  - Polls every 15 minutes; if a new PDF is detected, shows a toast.
- *  - Applies cache-busting so updated-but-same-URL PDFs always refresh.
+ * Top-level client orchestrator for the forecast feature.
+ *
+ * Maintains:
+ *  - a `lang` tab ("en" | "bn"),
+ *  - the parsed forecast metadata (both variants),
+ *  - polling + change detection across BOTH languages.
  */
 export default function WeatherForecast() {
   const [status, setStatus] = useState<Status>("loading");
@@ -26,23 +31,31 @@ export default function WeatherForecast() {
   const [lastFetched, setLastFetched] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Cache-buster token forces the PDF viewer to re-fetch fresh bytes.
+  /** Active language tab. English is the default. */
+  const [lang, setLang] = useState<ForecastLang>("en");
+
+  // Cache-buster — bumped on every fresh fetch OR every tab switch so
+  // PdfViewer always re-fetches fresh bytes from the proxy.
   const [cacheBuster, setCacheBuster] = useState<number>(() => Date.now());
 
-  // Pending new forecast detected by a background poll (awaiting user action).
+  // Pending new forecast detected by a background poll.
   const [pendingUpdate, setPendingUpdate] = useState<ForecastResponse | null>(
     null
   );
 
-  // Track the currently displayed signature to detect changes.
+  // Signature captures "is anything different across either variant?".
   const currentSigRef = useRef<string>("");
 
-  /**
-   * Build a signature that captures "is this a different forecast?".
-   * Includes the URL, file name and published date.
-   */
+  /** Combined signature across both language variants. */
   const signatureOf = (d: ForecastResponse) =>
-    `${d.pdfUrl}|${d.fileName}|${d.publishedDate ?? ""}`;
+    [
+      d.english.pdfUrl,
+      d.english.fileName,
+      d.english.publishedDate ?? "",
+      d.bangla?.pdfUrl ?? "",
+      d.bangla?.fileName ?? "",
+      d.bangla?.publishedDate ?? "",
+    ].join("|");
 
   /** Fetch the latest forecast from our API. */
   const fetchForecast = useCallback(
@@ -83,7 +96,7 @@ export default function WeatherForecast() {
     }
   }, [fetchForecast]);
 
-  /** Manual refresh (user clicked Refresh). Always applies immediately. */
+  /** Manual refresh (user clicked Refresh). */
   const manualRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -91,7 +104,6 @@ export default function WeatherForecast() {
       if (result) {
         currentSigRef.current = signatureOf(result);
         setData(result);
-        // New cache-buster guarantees fresh PDF bytes even if URL is unchanged.
         setCacheBuster(Date.now());
         setLastFetched(new Date());
         setStatus("ready");
@@ -104,18 +116,15 @@ export default function WeatherForecast() {
     }
   }, [fetchForecast]);
 
-  /** Background poll — only notifies; does not disrupt the current view. */
+  /** Background poll — only notifies. */
   const backgroundPoll = useCallback(async () => {
     try {
       const result = await fetchForecast({ fresh: true });
       if (!result) return;
       const sig = signatureOf(result);
       if (sig !== currentSigRef.current) {
-        // A genuinely new forecast — surface a notification.
         setPendingUpdate(result);
       } else {
-        // Same forecast: still refresh "last fetched" and bust the PDF cache
-        // silently so updated-in-place files are picked up over time.
         setLastFetched(new Date());
       }
     } catch {
@@ -123,7 +132,7 @@ export default function WeatherForecast() {
     }
   }, [fetchForecast]);
 
-  // Apply a pending update when the user clicks "View latest".
+  /** Apply a pending update when the user clicks "View latest". */
   const applyPendingUpdate = useCallback(() => {
     if (!pendingUpdate) return;
     currentSigRef.current = signatureOf(pendingUpdate);
@@ -133,12 +142,24 @@ export default function WeatherForecast() {
     setPendingUpdate(null);
   }, [pendingUpdate]);
 
+  /** Switch language tab — also bumps the cache-buster so PdfViewer reloads. */
+  const handleLangChange = useCallback(
+    (next: ForecastLang) => {
+      if (next === lang) return;
+      // If the user picks Bangla but it's unavailable, ignore.
+      if (next === "bn" && !data?.bangla) return;
+      setLang(next);
+      setCacheBuster(Date.now());
+    },
+    [lang, data]
+  );
+
   // Initial fetch on mount.
   useEffect(() => {
     initialLoad();
   }, [initialLoad]);
 
-  // 15-minute auto-refresh timer + refresh when tab becomes visible again.
+  // 15-minute auto-refresh + refresh on tab visibility.
   useEffect(() => {
     const id = setInterval(backgroundPoll, AUTO_REFRESH_MS);
     const onVisible = () => {
@@ -151,22 +172,27 @@ export default function WeatherForecast() {
     };
   }, [backgroundPoll]);
 
-  // ---- Render states ----------------------------------------------------
+  // ---- Render -----------------------------------------------------------
 
-  if (status === "loading") {
-    return <LoadingState />;
-  }
-
-  if (status === "error") {
+  if (status === "loading") return <LoadingState />;
+  if (status === "error")
     return <ErrorState message={errorMsg} onRetry={initialLoad} />;
-  }
-
   if (!data) return null;
+
+  // Resolve the active variant. Bangla may be null in degraded mode;
+  // if so, force-fall-back to English so the viewer always has data.
+  const activeVariant =
+    lang === "bn" && data.bangla ? data.bangla : data.english;
+  const effectiveLang: ForecastLang =
+    lang === "bn" && data.bangla ? "bn" : "en";
 
   return (
     <div className="flex flex-col gap-6">
       <ForecastInfoCard
         data={data}
+        activeVariant={activeVariant}
+        lang={effectiveLang}
+        onLangChange={handleLangChange}
         lastFetched={lastFetched}
         onRefresh={manualRefresh}
         refreshing={refreshing}
@@ -174,9 +200,9 @@ export default function WeatherForecast() {
 
       <div className="h-[78vh] min-h-[480px]">
         <PdfViewer
-          pdfUrl={data.pdfUrl}
-          fileName={data.fileName}
-          cacheBuster={cacheBuster}
+          pdfUrl={activeVariant.pdfUrl}
+          fileName={activeVariant.fileName}
+          cacheBuster={`${effectiveLang}-${cacheBuster}`}
         />
       </div>
 

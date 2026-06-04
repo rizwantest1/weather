@@ -1,6 +1,10 @@
 "use client";
 
-import type { ForecastResponse } from "@/lib/types";
+import type {
+  ForecastResponse,
+  ForecastLanguageVariant,
+  ForecastLang,
+} from "@/lib/types";
 import {
   CalendarIcon,
   FileIcon,
@@ -11,11 +15,11 @@ import {
 
 interface ForecastInfoCardProps {
   data: ForecastResponse;
-  /** When the data was last fetched into the client (Date). */
+  activeVariant: ForecastLanguageVariant;
+  lang: ForecastLang;
+  onLangChange: (next: ForecastLang) => void;
   lastFetched: Date | null;
-  /** Manual refresh handler. */
   onRefresh: () => void;
-  /** Whether a refresh is in-flight. */
   refreshing: boolean;
 }
 
@@ -44,10 +48,15 @@ function formatTime(value: Date | null): string {
 
 export default function ForecastInfoCard({
   data,
+  activeVariant,
+  lang,
+  onLangChange,
   lastFetched,
   onRefresh,
   refreshing,
 }: ForecastInfoCardProps) {
+  const banglaAvailable = data.bangla !== null;
+
   return (
     <section
       id="forecast-info-card"
@@ -78,17 +87,37 @@ export default function ForecastInfoCard({
         </button>
       </div>
 
-      {/* Detail grid */}
+      {/* Language tabs */}
+      <div
+        role="tablist"
+        aria-label="Forecast language"
+        className="mt-4 inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800/60"
+      >
+        <LangTab
+          active={lang === "en"}
+          onClick={() => onLangChange("en")}
+          label="English"
+        />
+        <LangTab
+          active={lang === "bn"}
+          onClick={() => onLangChange("bn")}
+          label="বাংলা"
+          disabled={!banglaAvailable}
+          disabledHint="Bangla forecast temporarily unavailable"
+        />
+      </div>
+
+      {/* Detail grid — reflects the ACTIVE language variant */}
       <dl className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <InfoItem
           icon={<CalendarIcon className="h-5 w-5" />}
           label="Publication Date"
-          value={formatDate(data.publishedDate)}
+          value={formatDate(activeVariant.publishedDate)}
         />
         <InfoItem
           icon={<FileIcon className="h-5 w-5" />}
           label="PDF File Name"
-          value={data.fileName}
+          value={activeVariant.fileName}
           mono
         />
         <InfoItem
@@ -99,10 +128,45 @@ export default function ForecastInfoCard({
       </dl>
 
       <p className="mt-4 text-xs text-slate-400 dark:text-slate-500">
-        Source: Bangladesh Meteorological Department (BMD) · Auto-checks for a
-        new forecast every 15 minutes.
+        Source: Bangladesh Meteorological Department (BMD) ·{" "}
+        {lang === "bn" ? "Bangla edition" : "English edition"} · Auto-checks for
+        a new forecast every 15 minutes.
       </p>
     </section>
+  );
+}
+
+function LangTab({
+  active,
+  onClick,
+  label,
+  disabled,
+  disabledHint,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  disabled?: boolean;
+  disabledHint?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      disabled={disabled}
+      title={disabled ? disabledHint : undefined}
+      className={[
+        "min-w-[5rem] rounded-lg px-3.5 py-1.5 text-sm font-semibold transition",
+        active
+          ? "bg-white text-sky-600 shadow-sm dark:bg-slate-900 dark:text-sky-400"
+          : "text-slate-600 hover:text-sky-600 dark:text-slate-300 dark:hover:text-sky-400",
+        disabled ? "cursor-not-allowed opacity-50 hover:text-slate-600" : "",
+      ].join(" ")}
+    >
+      {label}
+    </button>
   );
 }
 
