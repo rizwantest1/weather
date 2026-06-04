@@ -68,6 +68,20 @@ function loadPdfJs(): Promise<PdfJsLib> {
   return pdfJsPromise;
 }
 
+/**
+ * Fetch PDF bytes via the proxy and return a blob: URL.
+ * Using fetch() instead of giving PDF.js the URL directly prevents
+ * download managers (IDM etc.) from intercepting the request.
+ */
+async function fetchPdfBlob(proxiedUrl: string): Promise<string> {
+  const res = await fetch(proxiedUrl, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`PDF proxy returned HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
 interface PdfViewerProps {
   /** The original BMD PDF URL (used for download / open-in-tab). */
   pdfUrl: string;
@@ -92,6 +106,7 @@ export default function PdfViewer({
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const docRef = useRef<PdfDocument | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
 
   const [scale, setScale] = useState(1.2);
   const [loading, setLoading] = useState(true);
@@ -137,10 +152,25 @@ export default function PdfViewer({
     setError(null);
 
     (async () => {
+      let blobUrl: string | null = null;
       try {
-        const pdfjs = await loadPdfJs();
-        const doc = await pdfjs.getDocument({ url: proxiedUrl }).promise;
+        // Fetch bytes ourselves via fetch() — this bypasses download managers
+        // (IDM etc.) that intercept navigation-level PDF requests.
+        const [pdfjs, blob] = await Promise.all([
+          loadPdfJs(),
+          fetchPdfBlob(proxiedUrl),
+        ]);
+        blobUrl = blob;
+        blobUrlRef.current = blobUrl;
+
+        if (cancelled) {
+          URL.revokeObjectURL(blobUrl);
+          return;
+        }
+
+        const doc = await pdfjs.getDocument({ url: blobUrl }).promise;
         if (cancelled) return;
+
         docRef.current = doc;
         setNumPages(doc.numPages);
         await renderAllPages(doc, scale);
@@ -156,6 +186,10 @@ export default function PdfViewer({
 
     return () => {
       cancelled = true;
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proxiedUrl]);
